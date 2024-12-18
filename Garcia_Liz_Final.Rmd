@@ -1,0 +1,331 @@
+---
+title: "Garcia_Liz_Final"
+author: "Liz Garcia"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+**Note about datasets**: The first row of the file corresponds to the labels of the samples used for the authors in the original work. In the second row are the labels used in the context of this paper. The first column of the dataset file contains the original labels of the genes. The dataset is a n x m matrix, where n are the genes and m the samples.
+
+### Part 1: replicate Figures 5 and 6 with cDNA dataset
+1. Replicate Figure 5 of the paper to visualize hierarchical clustering vs. k-means clustering for a specific cDNA dataset, Alizadeh-2000-v2, using a heatmap/dendrogram. 
+
+```{r}
+# Load Alizadeh-2000-v2 dataset
+# First two rows: dataset labels and study labels, respectively.
+
+# Define function to get datasets
+get_data = function(file) {
+  # Remove the original sample labels (first row)
+  raw_data = read.delim(file, header = FALSE, sep = "\t", skip = 1)
+  gene_labels = raw_data[-1, 1]
+  sample_labels = raw_data[1, -1]
+  # Get expression values, set column and row names
+  data = raw_data[-1,-1]
+  # Convert data to numeric
+  data = data.frame(lapply(data, function(x) as.numeric(as.character(x))))
+  colnames(data) = sample_labels
+  rownames(data) = gene_labels
+  return(data)
+}
+
+file = "/Users/garcial/Fall 2024/QCB 455/QCB Project/cdna-data/alizadeh-2000-v2_database.txt"
+
+data = get_data(file) 
+dim(data) # 2,093 rows and 62 columns
+head(data) 
+# Verify if dataset has NA values
+sum(is.na(data))
+```
+
+```{r}
+# -------------- Perform hierarchical clustering ------------
+df = data 
+# Compute the Pearson correlation distance
+cor_matrix = cor(df, method = "pearson")
+dist_matrix = as.dist(1 - cor_matrix)
+
+# Install and load packages
+if (!requireNamespace("pheatmap", quietly = TRUE)) install.packages("pheatmap")
+library(pheatmap)
+
+# Generate the heatmap with dendrogram
+pheatmap(
+  t(df), # rows = samples, cols = genes
+  # Clusters the rows (samples) into their respective cluster
+  # based on the provided distance matrix.
+  clustering_distance_rows = dist_matrix,  
+  cutree_rows = 3,
+  clustering_method = "average",  # Use average linkage
+  main = "Heatmap/Dendrogram for Hierarchical Clustering using Alizadeh-2000-v2 Dataset (cDNA)",
+  scale = "none",  
+  cluster_rows = TRUE, 
+  cluster_cols = FALSE, # Disable clustering on columns (genes)
+  show_rownames = TRUE, # Show sample labels along rows (right side)
+  show_colnames = FALSE, # Hide gene labels along columns (top)
+  cex = 0.6,
+  fontsize = 14,
+)
+```
+
+
+```{r}
+# -------------- Perform k-means clustering --------------
+set.seed(4)
+
+perform_kmeans = function(data, title, k) {
+  df = t(scale(data)) # rows = samples, columns = genes
+  kmeans_result = kmeans(df, centers = k)  # k-means operates on rows by default
+  cluster_assignments = kmeans_result$cluster
+  
+  # Create a new dataset with samples grouped according to their type
+  gene_data_ordered = df[order(cluster_assignments), ]
+  
+  cluster_assignments = cluster_assignments[order(cluster_assignments)]
+  cluster_assignments
+  
+  # Plot heatmaps for all k clusters under same grid
+  library(gridExtra)
+
+  heatmaps_list = list()
+  for(i in 1:k) {
+    cluster_data = gene_data_ordered[cluster_assignments == i, , drop = FALSE]
+    heatmap_cluster = pheatmap(cluster_data,
+                                cluster_rows = FALSE,
+                                cluster_cols = FALSE,
+                                show_rownames = TRUE,
+                                show_colnames = FALSE,
+                                main = paste("Cluster ", i),
+                                fontsize = 12,
+                                width = 10, height = 10,
+                               cex = 0.6,
+                               silent = TRUE)
+    heatmaps_list[[i]] <- heatmap_cluster$gtable
+  }
+  # Arrange all k heatmaps in a single layout
+  grid.arrange(grobs = heatmaps_list, 
+               ncol = k, 
+               top = title)
+}
+
+title = "Heatmap for K-means using Alizadeh-2000-v2 Dataset (cDNA)"
+k = length(unique(colnames(data)))
+perform_kmeans(data, title, k)
+
+```
+
+2. Replicate Figure 6 of the paper to visualize the clustering of sample groups within the Alizadeh-2000-v2 dataset using PCA to plot a scatterplot with the top two largest components.
+
+```{r}
+# ----------------------- Perform PCA Analysis ----------------------
+perform_PCA = function(data, title, color_mapping) {
+  # Transpose data to have samples as rows and genes as columns
+  transposed_data = t(data)
+  
+  pca_result = prcomp(transposed_data, scale. = FALSE)
+  
+  # Extract PCA results for plotting
+  pca_data = as.data.frame(pca_result$x[, 1:2])  # Use the first two components
+  # Sign of eigenvectors is arbitrary. 
+  # Flip sign for 2nd component values to match paper's orientation
+  pca_data$PC2 = -1 * pca_data$PC2
+  pca_data$SampleClass = colnames(data)
+  
+  library(ggplot2)
+  ggplot(pca_data, aes(x = PC1, y = PC2, color = SampleClass)) +
+    geom_point(size = 3, alpha = 0.8) +  # Scatter plot
+    scale_color_manual(values = color_mapping) + 
+    labs(
+      title = title,
+      x = "1st component",
+      y = "2nd component"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      legend.title = element_blank()
+    )
+}
+
+title = "PCA Analysis for Alizadeh-2000-v2 Dataset (cDNA)"
+color_mapping = c("DLBCL" = "red", "FL" = "green", "CLL" = "blue")
+perform_PCA(data, title, color_mapping)
+```
+
+### Part 2: replicate Figure 5 and 6 with Affymetrix dataset
+
+1. Replicate Figure 5 again to visualize hierarchical clustering vs. k-means clustering, but this time for an *Affymetrix dataset*, using a heatmap/ dendrogram to compare the paper's result and see if the dataset type (Affymetrix vs. cDNA) has any impact. We use *Armstrong-2000-v2* since it has the same number of classes and similar number of samples as the originally used cDNA dataset.
+
+```{r}
+# Load Armstrong-2000-v2 dataset
+file = "/Users/garcial/Fall 2024/QCB 455/QCB Project/affy-data/armstrong-2002-v2_database.txt"
+
+armstrong_data = get_data(file)
+head(armstrong_data)
+dim(armstrong_data)
+unique(colnames(armstrong_data))
+sum(is.na(armstrong_data))
+```
+
+```{r}
+# -------------- Perform hierarchical clustering ------------
+df = armstrong_data
+# Compute the Pearson correlation distance
+cor_matrix = cor(df, method = "pearson") # rows = samples, *cols = genes
+dist_matrix = as.dist(1 - cor_matrix) 
+
+# Generate the heatmap with row dendrogram
+pheatmap(
+  t(df), # rows = samples, cols = genes
+  # Clusters the rows (samples) into their respective cluster
+  # based on the provided distance matrix.
+  clustering_distance_rows = dist_matrix,  
+  cutree_rows = 3,
+  clustering_method = "average",  # Use average linkage
+  main = "Heatmap/Dendrogram for Hierarchical Clustering using Armstrong-2000-v2 Dataset (Affymetrix)",
+  scale = "none",  
+  cluster_rows = TRUE, 
+  cluster_cols = FALSE, # Disable clustering on columns (genes)
+  show_rownames = TRUE, # Show sample labels along rows (right side)
+  show_colnames = FALSE, # Hide gene labels along columns (top)
+  cex = 0.5,
+  fontsize = 14,
+)
+```
+
+```{r}
+# Perform k-means clustering for Armstrong-2000-v2 (Affymetrix)
+set.seed(4)
+title = "Heatmap for K-means using Armstrong-2000-v2 Dataset (Affymetrix)"
+k = length(unique(colnames(armstrong_data)))
+perform_kmeans(armstrong_data, title, k)
+```
+
+2. Replicate Figure 6 again to visualize the clustering of sample groups within the chosen *Affymetrix dataset*, using PCA to plot a scatterplot with the top two largest components.
+
+```{r}
+#  Perform PCA Analysis
+unique(colnames(armstrong_data))
+title = "PCA Analysis for Armstrong-2000-v2 Dataset (Affymetrix)"
+color_mapping = c("ALL" = "red", "MLL" = "green", "AML" = "blue")
+perform_PCA(armstrong_data, title, color_mapping)
+```
+
+
+### Part 3: Replicate figure 5 and 6 with two highest mean cR index algorithms
+
+* Replicate Figure 5 / Figure 6 for the *two clustering algorithms that had the highest mean cR index* for an Affymetrix dataset and a cDNA dataset respectively. The two datasets will contain brain tissue data, since we have compared blood previously and there are more datasets with the brain tissue type. The chosen Affymetrix dataset is *Nutt-2003-v1* and the chosen cDNA dataset is *Bredel-2005*, since they have the same number of samples and similar number of classes. 
+
+The best two clustering algorithms found in the paper were *finite mixture of Gaussians (FMG)*, followed closely by *k-means*. These exhibited the best performance in recovering the true structure of the datasets; on average, the smallest difference between the actual number of classes in the datasets; and the best number of clusters as indicated by the paper's validation criteria. Thus, these are the algorithms that will be employed here.
+
+
+```{r}
+# Load Nutt-2003-v1 and Bredel-2005 datasets
+affy_path = "/Users/garcial/Fall 2024/QCB 455/QCB Project/affy-data/nutt-2003-v1_database.txt"
+
+cdna_path = "/Users/garcial/Fall 2024/QCB 455/QCB Project/cdna-data/bredel-2005_database.txt"
+
+affy = get_data(affy_path)
+head(affy)
+unique(colnames(affy))
+sum(is.na(affy))
+
+cdna = get_data(cdna_path)
+head(cdna)
+unique(colnames(cdna))
+sum(is.na(cdna))
+
+```
+
+1.1 Figure 5 generation with Affymetrix dataset (Nutt-2003-v1)
+
+```{r}
+# ------ Perform FMG clustering with Affymetrix dataset --------
+library(pheatmap)
+library(mclust)
+library(gridExtra)
+
+perform_FMG= function(data, title, k) {
+  df = t(scale(data)) # rows = samples, cols = genes
+  
+  # Perform FMG (Finite Mixture Gaussian) clustering
+  gmm_result = Mclust(df, G = k) # G = number of clusters
+  cluster_assignments = gmm_result$classification
+  gene_data_ordered = df[order(cluster_assignments), ] 
+  
+  cluster_assignments = cluster_assignments[order(cluster_assignments)]
+  
+  # Plot heatmaps for all clusters under same grid
+  library(gridExtra)
+
+  heatmaps_list = list()
+  for(i in 1:k) {
+    cluster_data = gene_data_ordered[cluster_assignments == i, , drop = FALSE]
+    heatmap_cluster = pheatmap(cluster_data,
+                                cluster_rows = FALSE,
+                                cluster_cols = FALSE,
+                                show_rownames = TRUE,
+                                show_colnames = FALSE,
+                                main = paste("Cluster ", i),
+                                fontsize = 12,
+                                width = 10, height = 10,
+                               cex = 0.6,
+                               silent = TRUE)
+    heatmaps_list[[i]] <- heatmap_cluster$gtable
+  }
+  # Arrange all heatmaps in a single layout
+  grid.arrange(grobs = heatmaps_list, 
+               ncol = k, 
+               top = title)
+}
+
+title = "Heatmap for FMG using Nutt-2003-v1 Dataset (Affymetrix)"
+k = length(unique(colnames(affy)))
+perform_FMG(affy, title, k)
+
+```
+
+```{r}
+# -------------- Perform k-means clustering with Affymetrix dataset ------------
+set.seed(4)
+title = "Heatmap for K-means using Nutt-2003-v1 Dataset (Affymetrix)"
+k = length(unique(colnames(affy)))
+perform_kmeans(affy, title, k)
+```
+
+1.2 Figure 5 generation with cDNA dataset (Bredel-2005)
+
+```{r}
+# -------------- Perform FMG clustering with cDNA dataset --------------
+title = "Heatmap for FMG using Bredel-2005 Dataset (cDNA)"
+k = length(unique(colnames(cdna)))
+perform_FMG(cdna, title, k)
+```
+
+```{r}
+# -------------- Perform k-means clustering with cDNA dataset --------------
+set.seed(4)
+title = "Heatmap for K-means using Bredel-2005 Dataset (cDNA)"
+k = length(unique(colnames(cdna)))
+perform_kmeans(cdna, title, k)
+```
+
+2. Figure 6 generation
+
+```{r}
+# --------------- PCA Analysis for Affy dataset --------------- 
+unique(colnames(affy))
+title = "PCA Analysis for Nutt-2003-v1 Dataset (Affymetrix)"
+color_mapping = c("CG" = "red", "CO" = "blue", "NG"="green", "NO"="purple")
+perform_PCA(affy, title, color_mapping)
+```
+
+```{r}
+# --------------- PCA Analysis for cDNA dataset --------------- 
+unique(colnames(cdna))
+title = "PCA Analysis for Bredel-2005 Dataset (cDNA)"
+color_mapping = c("OG" = "red", "GBM" = "blue", "A"="green")
+perform_PCA(cdna, title, color_mapping)
+```
